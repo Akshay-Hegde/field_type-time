@@ -1,109 +1,147 @@
 <?php defined('BASEPATH') or exit('No direct script access allowed');
 
 /**
- * PyroStreams Date/Time Field Type
+ * Time field type for PyroCMS
  *
- * @package		PyroCMS\Core\Modules\Streams Core\Field Types
- * @author		Parse19
- * @copyright	Copyright (c) 2011 - 2012, Parse19
- * @license		http://parse19.com/pyrostreams/docs/license
- * @link		http://parse19.com/pyrostreams
+ * @author		Marco Grüter
  */
 class Field_time
-{	
+{
 	public $field_type_slug			= 'time';
-	
+
 	public $db_col_type				= 'time';
 
-	public $custom_parameters		= array();
+	public $custom_parameters		= array('use_seconds', 'minutes_interval', 'seconds_interval');
 
 	public $version					= '1.0';
 
 	public $author					= array('name'=>'Healthworld (Schweiz) AG', 'url'=>'http://www.healthworld.ch');
-		
-	// --------------------------------------------------------------------------
 
-	/**
-	 * Validate input
-	 *
-	 * @access	public
-	 * @param	string
-	 * @param	string - mode: edit or new
-	 * @param	object
-	 * @return	mixed - true or error string
-	 */
-	public function validate($value, $mode, $field)
+    public function pre_save($input, $field)
 	{
-		// Up front, let's determine if this 
-		// a required field.
-		$field_data = $this->CI->form_validation->field_data($field->field_slug);
-	
-		// Determine required
-		$rules = $field_data['rules'];
-		$rules_array = explode('|', $rules);
-		$required = (in_array('required', $rules_array)) ? true : false;
-
-		// Are all three fields available?
-		if ( ! $this->CI->input->post($field->field_slug.'_hours') or ! $this->CI->input->post($field->field_slug.'_minutes') )
+		// input data without form field
+		if (isset($input) && !empty($input) && $input !== '1')
 		{
-			return lang('required');
+			return $input;
 		}
 
-		return true;
+		$value = '';
+
+		$hours = '00';
+		$minutes = '00';
+
+		// hours
+		if ($this->CI->input->post($field->field_slug.'_hours'))
+		{
+			$hours = $this->CI->input->post($field->field_slug.'_hours');
+		}
+
+		// minutes
+		if ($this->CI->input->post($field->field_slug.'_minutes'))
+		{
+			$minutes = $this->CI->input->post($field->field_slug.'_minutes');
+		}
+
+		$value = $hours . ':' . $minutes;
+
+		if( ! empty($field->field_data['use_seconds']) && $field->field_data['use_seconds'] == 'yes')
+		{
+			// Minute
+			$seconds = '00';
+			if ($this->CI->input->post($field->field_slug.'_seconds'))
+			{
+				$seconds = $this->CI->input->post($field->field_slug.'_seconds');
+			}
+
+			$value .= ':' . $seconds;
+		}
+
+		return $value;
 	}
 
 	public function form_output($data, $entry_id, $field)
 	{
-		$date_input = '';
+		$current_time = $this->_parse_time($data['value'], $data['form_slug']);
 
-		// get current hour and minutes, seconds get dropped
-		if($data['value'] == '')
+		$minutes_interval = empty($data['custom']['minutes_interval']) ? 5 : $data['custom']['minutes_interval'];
+		$seconds_interval = empty($data['custom']['seconds_interval']) ? 10 : $data['custom']['seconds_interval'];
+
+		$form_input = '';
+
+		// build the hours array and form input
+		$hours = array();
+
+		for($x = 0;$x <= 23; $x += 1)
 		{
-			$data['value'] = '00:00:00';
+			$hours[$x] = $this->_two_digit_number($x);
 		}
 
-		list($current_hours, $current_minutes, $current_seconds) = explode(':', $data['value']);
+		$form_input = form_dropdown($data['form_slug'] . '_hours', $hours, $current_time['hours']);
 
-		// Form input type. Defaults to datepicker
-		$input_type = ( ! isset($data['custom']['input_type'])) ? 'datepicker' : $data['custom']['input_type'];
-
-		$hours = array();
+		// build the minutes array
 		$minutes = array();
 
-		foreach(range(0, 23) as $h)
+		for($x = 0;$x <= 59; $x += $minutes_interval)
 		{
-			$hours[$h] = $this->two_digit_number($h);
+			$minutes[$x] = $this->_two_digit_number($x);
 		}
 
-		foreach(range(0, 59) as $m)
+		$form_input .= form_dropdown($data['form_slug'] . '_minutes', $minutes, $current_time['minutes']);
+
+		// build the seconds array, if they want to
+
+		if( isset($data['custom']['use_seconds']) && $data['custom']['use_seconds'] == 'yes')
 		{
-			$minutes[$m] = $this->two_digit_number($m);
+			for($x = 0;$x <= 59; $x += $seconds_interval)
+			{
+				$seconds[$x] = $this->_two_digit_number($x);
+			}
+
+			$form_input .= form_dropdown($data['form_slug'] . '_seconds', $seconds, $current_time['seconds']);
 		}
 
-		if ($field->is_required == 'no')
-		{
-			$hours = array('' => '---')+$hours;
-			$minutes = array('' => '---')+$minutes;
-		}
 
-		$date_input .= form_dropdown($data['form_slug'].'_hours', $hours, $current_hours);
-		$date_input .= form_dropdown($data['form_slug'].'_minutes', $minutes, $current_minutes);
+		// add a dummy time value, so the required rule is happy
+		$form_input .= form_hidden($data['form_slug'], '1');
 
-		//hidden field to get around the validation checks
-		$date_input .= form_hidden($data['form_slug'], '1');
-
-		return $date_input;
+		return $form_input;
 	}
 
-	public function pre_save($input, $field)
-	{	
-		$time = $this->two_digit_number($this->CI->input->post($field->field_slug.'_hours')). ':'
-				. $this->two_digit_number($this->CI->input->post($field->field_slug.'minutes')) . ':00';
+	public function param_minutes_interval($value = null)
+	{
+		$options = array(1 => 1, 5 => 5, 10 => 10, 15 => 15, 30 => 30);
 
-		return $time;
+		return form_dropdown('minutes_interval', $options, $value);
 	}
 
-	// --------------------------------------------------------------------------
+	public function param_seconds_interval($value = null)
+	{
+		$options = array(1 => 1, 5 => 5, 10 => 10, 15 => 15, 30 => 30);
+
+		return form_dropdown('seconds_interval', $options, $value);
+	}
+
+	public function param_use_seconds($value = null)
+	{
+		$options = array('yes' => 'Yes', 'no' => 'No');
+
+		return form_dropdown('use_seconds', $options, $value);
+	}
+
+	private function _parse_time($value, $slug)
+	{
+		$default_time = array('hours' => 12, 'minutes' => 0, 'seconds' => '0');
+		$time = array();
+
+		if($value == '' && $this->CI->input->post($slug) == '1')
+		{
+			$value = $this->CI->input->post($slug . '_hours') . ':' . $this->CI->input->post($slug . '_minutes')  . ':' . $this->CI->input->post($slug . '_seconds');
+		}
+
+		list($time['hours'], $time['minutes'], $time['seconds']) = explode(':', $value);
+
+		return array_merge($default_time, $time);
+	}
 
 	/**
 	 * Turns a single digit number into a
@@ -113,22 +151,22 @@ class Field_time
 	 * @param 	string
 	 * @return 	string
 	 */
-	public function two_digit_number($num)
+	private function _two_digit_number($digit)
 	{
-		$num = trim($num);
+		$digit = trim($digit);
 
-		if ($num == '')
+		switch(strlen($digit))
 		{
-			return '00';
-		}
+			case 0:
+				return '00';
+			break;
 
-		if (strlen($num) == 1)
-		{
-			return '0'.$num;
-		}
-		else
-		{
-			return $num;
+			case 1:
+				return '0' . $digit;
+			break;
+
+			default:
+				return $digit;
 		}
 	}
 
